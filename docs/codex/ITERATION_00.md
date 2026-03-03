@@ -4,7 +4,6 @@
 
 Repository currently contains:
 - README.md
-- /docs/codex/SPEC.md
 - .gitignore
 
 We are building a minimal production-ready Telegram bot skeleton.
