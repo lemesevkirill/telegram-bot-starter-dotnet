@@ -1,4 +1,4 @@
-# Telegram Bot Starter (Dotnet)
+# Telegram Bot Webhook Starter (Dotnet)
 
 Production-ready skeleton for building Telegram bots using:
 

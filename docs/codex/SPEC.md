@@ -1,4 +1,7 @@
 # Telegram Bot Webhook Starter (Dotnet)
+This document describes the target state of the repository after all planned iterations are completed.
+
+Individual iteration documents define incremental steps toward that state.
 
 ## Purpose
 

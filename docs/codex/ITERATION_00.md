@@ -4,7 +4,7 @@
 
 Repository currently contains:
 - README.md
-- SPEC.md
+- /docs/codex/SPEC.md
 - .gitignore
 
 We are building a minimal production-ready Telegram bot skeleton.
@@ -83,6 +83,12 @@ Keep it minimal and clean.
 ## Acceptance Criteria
 
 - dotnet build succeeds
-- dotnet run exposes /health/live
+- dotnet run exposes:
+    - GET /health/live
+    - GET /health/ready
+- Both health endpoints return:
+    - HTTP 200
+    - JSON body:
+        { "status": "ok" }
 - Docker build succeeds
-- No warnings
+- No compiler warnings
