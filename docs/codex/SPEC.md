@@ -105,39 +105,6 @@ No secrets must ever be committed.
 6. Worker simulates long task (or calls external API)
 7. Worker sends message back to user
 
----
-
-## Iteration Plan
-
-### Iteration 0
-- Create solution
-- Create two projects
-- Add Dockerfile
-- Add fly.toml
-- Add health endpoints
-
-### Iteration 1
-- Implement Telegram webhook endpoint
-- Validate secret token
-- Log update ID
-- Immediate 200 OK
-
-### Iteration 2
-- Implement background queue using Channel<T>
-- Implement BackgroundService
-- Enqueue job from webhook
-- Worker logs processing
-
-### Iteration 3
-- Add EF Core
-- Create Jobs table
-- Persist jobs
-- Worker processes persisted jobs
-
-### Iteration 4
-- Add structured logging
-- Add basic OpenTelemetry tracing
-- Add /metrics endpoint
 
 ---
 
