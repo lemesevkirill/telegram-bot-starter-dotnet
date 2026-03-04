@@ -22,11 +22,12 @@ A production-oriented skeleton for building Telegram bots using:
 - Docker build working
 - Fly configuration present
 
-### 🚧 Iteration 01 (In Progress)
-- Telegram webhook endpoint
-- PostgreSQL integration
-- Persistent Job storage
-- Strongly-typed configuration (Options pattern)
+### ✅ Iteration 01
+- Telegram webhook endpoint implemented
+- Webhook mapping extracted to dedicated endpoint file (`/Endpoints/TelegramWebhookEndpoint.cs`)
+- EF Core + PostgreSQL integration
+- Persistent Job storage (`Jobs.Id` uses bigint identity primary key)
+- Strongly-typed configuration via Options pattern
 
 ---
 
@@ -54,6 +55,7 @@ Single PostgreSQL database.
 /src
 
 /BotTemplate.Api
+  /Endpoints
 
 /BotTemplate.Core
 
@@ -69,17 +71,54 @@ Environment overrides use double underscore syntax:
 
 Telegram__BotToken=
 
-Telegram__SecretToken=
+Telegram__WebhookSecret=
 
 Database__ConnectionString=
 
 
 ---
 
+## Development Environment
+
+- Run the API locally via `dotnet run` or your IDE.
+- Docker is not required to run the application locally.
+- Use Docker only for infrastructure services such as PostgreSQL, Redis, message brokers, or other external dependencies.
+- Docker images are intended for deployment environments (production, CI, cloud).
+
+### Run application locally
+
+```bash
+dotnet run --project src/BotTemplate.Api
+```
+
+### Start PostgreSQL via Docker (optional)
+
+```bash
+docker run -d \
+  --name bot-postgres \
+  -e POSTGRES_USER=bot \
+  -e POSTGRES_PASSWORD=bot \
+  -e POSTGRES_DB=botdb \
+  -p 5432:5432 \
+  postgres:16
+```
+
+The application connects to PostgreSQL via the configured connection string.
+
+Recommended local development workflow:
+
+1. Start infrastructure services (PostgreSQL) via Docker if needed.
+2. Run the API locally via `dotnet run`.
+3. Use IDE debugging and hot reload.
+
+Running the API in Docker during development is not required and may slow down debugging.
+
+---
+
 ## Roadmap
 
 - [x] Iteration 00 — Solution skeleton
-- [ ] Iteration 01 — Webhook + EF Core
+- [x] Iteration 01 — Webhook + EF Core
 - [ ] Iteration 02 — Background worker
 - [ ] Iteration 03 — Telegram response sending
 - [ ] Iteration 04 — LLM integration
