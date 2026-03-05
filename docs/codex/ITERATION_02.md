@@ -25,7 +25,7 @@ Iteration 01 implemented:
 * Development workflow without Docker
 * Telegram webhook integration verified
 
-Jobs currently accumulate in the database with status `pending`, but nothing processes them yet.
+Jobs currently accumulate in the database with status `Pending`, but nothing processes them yet.
 
 ---
 
@@ -39,7 +39,8 @@ This iteration introduces:
 4. Job locking
 5. Processing simulation
 6. Retry tracking fields
-7. README documentation update
+7. Configurable worker polling and safety limits
+8. README documentation update
 
 No real Telegram responses or AI processing yet.
 
@@ -111,6 +112,49 @@ Processing finished successfully.
 Failed
 Processing failed.
 
+Retry rule:
+
+- `Attempts` increments when a job transitions from `Pending` to `Processing`
+- if processing fails and `Attempts < MaxAttempts`, the job returns to `Pending`
+- if processing fails and `Attempts >= MaxAttempts`, the job becomes `Failed`
+
+---
+
+## Worker Processing State Machine
+
+The worker processing model is a deterministic state machine with four states:
+
+- Pending
+- Processing
+- Completed
+- Failed
+
+Allowed transitions:
+
+- `Pending -> Processing`
+- `Processing -> Completed`
+- `Processing -> Pending`
+- `Processing -> Failed`
+
+Transition rules:
+
+- `Pending -> Processing`
+  Occurs when a worker successfully acquires the job using an atomic update.
+  `Attempts` is incremented during this transition.
+
+- `Processing -> Completed`
+  Occurs when job processing finishes successfully.
+
+- `Processing -> Pending`
+  Occurs when processing throws an exception and `Attempts < MaxAttempts`.
+
+- `Processing -> Failed`
+  Occurs when processing throws an exception and `Attempts >= MaxAttempts`.
+
+Important rule:
+
+- `Attempts` increments only when the job transitions from `Pending` to `Processing`.
+
 ---
 
 # Database Changes
@@ -137,6 +181,8 @@ Tracks the last status change.
 
 Create a new EF migration for these changes.
 
+Repository is pre-production. Database resets are acceptable for this iteration, so no string-to-int status migration path is required.
+
 ---
 
 # Job Entity
@@ -159,25 +205,59 @@ Introduce a background worker using:
 
 BackgroundService
 
-The worker runs continuously.
+The worker runs continuously inside the same ASP.NET Core process.
+
+Multiple application instances are allowed.
+
+Multi-instance worker execution is expected.
+
+Workers coordinate through atomic database updates so only one worker acquires a given pending job.
+
+## WorkerOptions
+
+Configuration class:
+
+WorkerOptions
+
+Properties:
+
+- PollIntervalMs
+- MaxAttempts
+- MaxJobAgeMinutes
+
+Example defaults:
+
+- PollIntervalMs = 1000
+- MaxAttempts = 2
+- MaxJobAgeMinutes = 30
+
+Environment variables:
+
+- Worker__PollIntervalMs
+- Worker__MaxAttempts
+- Worker__MaxJobAgeMinutes
 
 Pseudo flow:
 
 loop forever
 
 ```
-fetch one pending job
+select one job where Status = Pending and Attempts < MaxAttempts
 
-atomically lock job
+order by Id ASC
 
-mark as processing
+attempt atomic acquisition
+
+after acquisition, check job age
+
+if job is too old, mark failed and skip processing
 
 simulate processing
 
 mark as completed
 ```
 
-sleep briefly and repeat
+sleep for configured poll interval and repeat
 
 ---
 
@@ -189,14 +269,26 @@ Use an atomic database update pattern.
 
 Concept:
 
-UPDATE Jobs
-SET Status = Processing
-WHERE Id = ?
-AND Status = Pending
+1. Worker selects one candidate job:
+   - `Status = Pending`
+   - `Attempts < MaxAttempts`
+   - `ORDER BY Id ASC`
+   - one row only
 
-Only continue if exactly one row was affected.
+2. Worker attempts an atomic acquisition:
+   - change `Pending -> Processing`
+   - increment `Attempts`
+   - update `UpdatedAt`
+
+3. If exactly one row was affected, the job was acquired.
+
+4. If zero rows were affected, another worker acquired the job.
+
+The worker must retry the loop.
 
 This guarantees that only one worker acquires the job.
+
+`CreatedAt` remains in the schema for diagnostics but is not used for job ordering.
 
 ---
 
@@ -214,21 +306,39 @@ mark job as completed
 
 No external APIs yet.
 
+After acquisition but before processing, worker must check job age.
+
+If job age exceeds `MaxJobAgeMinutes`, mark the job as `Failed` and do not process it.
+
 ---
 
 # Error Handling
 
 If processing throws an exception:
 
-increment Attempts
-
 store error message in LastError
 
+Do not increment `Attempts` here.
+
+`Attempts` was already incremented during acquisition.
+
+if Attempts < MaxAttempts:
+return job to Pending
+
+if Attempts >= MaxAttempts:
 set status to Failed
+
+Retry condition is evaluated after the exception using the already incremented `Attempts` value.
 
 update UpdatedAt
 
 log the error
+
+Iteration 02 does not implement automatic recovery for jobs stuck in `Processing`.
+
+If a worker process crashes after acquiring a job, that job may remain in `Processing`.
+
+Manual intervention is acceptable in this iteration.
 
 ---
 
@@ -283,6 +393,8 @@ Infrastructure such as PostgreSQL may run in Docker.
 
 The worker runs inside the same application process.
 
+Docker remains for infrastructure only during local development.
+
 ---
 
 # Verification
@@ -299,6 +411,9 @@ Pending → Processing → Completed
 
 6. Database reflects status transitions
 7. Attempts and UpdatedAt update correctly
+8. Retry behavior follows `MaxAttempts`
+9. FIFO ordering uses `Id ASC`
+10. Jobs older than `MaxJobAgeMinutes` are marked `Failed` without processing
 
 ---
 
@@ -309,7 +424,6 @@ This iteration does NOT include:
 Telegram responses
 AI integration
 TTS generation
-parallel workers
 distributed queues
 
 These will be introduced in later iterations.

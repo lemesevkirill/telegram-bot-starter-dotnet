@@ -74,6 +74,8 @@ Only structure and infrastructure skeleton.
 - Do NOT add background workers.
 - Do NOT add logging libraries.
 - No extra abstractions.
+- Local application run should use `dotnet run`.
+- Docker is for container builds and deployment artifacts in this iteration, not required for local application execution.
 
 Keep it minimal and clean.
 
