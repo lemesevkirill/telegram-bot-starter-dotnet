@@ -10,7 +10,13 @@ public sealed class Job
 
     public string UpdatePayload { get; set; } = string.Empty;
 
-    public string Status { get; set; } = string.Empty;
+    public JobStatus Status { get; set; }
+
+    public int Attempts { get; set; }
+
+    public string? LastError { get; set; }
 
     public DateTime CreatedAt { get; set; }
+
+    public DateTime UpdatedAt { get; set; }
 }

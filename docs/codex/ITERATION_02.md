@@ -40,7 +40,8 @@ This iteration introduces:
 5. Processing simulation
 6. Retry tracking fields
 7. Configurable worker polling and safety limits
-8. README documentation update
+8. Controlled in-process concurrency
+9. README documentation update
 
 No real Telegram responses or AI processing yet.
 
@@ -168,6 +169,10 @@ Attempts (int, default 0)
 LastError (text, nullable)
 UpdatedAt (timestamp)
 
+Required index:
+
+IX_Jobs_Status_Attempts_Id
+
 Purpose:
 
 Attempts
@@ -178,6 +183,9 @@ Stores error message if processing fails.
 
 UpdatedAt
 Tracks the last status change.
+
+IX_Jobs_Status_Attempts_Id
+Supports the polling query on `Status`, `Attempts`, and `Id`.
 
 Create a new EF migration for these changes.
 
@@ -222,31 +230,52 @@ WorkerOptions
 Properties:
 
 - PollIntervalMs
+- MaxConcurrentJobs
 - MaxAttempts
 - MaxJobAgeMinutes
 
 Example defaults:
 
 - PollIntervalMs = 1000
+- MaxConcurrentJobs = 4
 - MaxAttempts = 2
 - MaxJobAgeMinutes = 30
+
+Production deployments may override `PollIntervalMs` to `2000`.
 
 Environment variables:
 
 - Worker__PollIntervalMs
+- Worker__MaxConcurrentJobs
 - Worker__MaxAttempts
 - Worker__MaxJobAgeMinutes
+
+Concurrency rules:
+
+- worker keeps polling while local capacity is available
+- worker may process up to `MaxConcurrentJobs` jobs in parallel inside one process
+- job acquisition remains atomic across all worker instances
+- each job execution must use its own service scope and `DbContext`
+
+Polling delay:
+
+- use `PollIntervalMs` plus jitter from `0` to `200` ms
+- jitter reduces synchronization across multiple application instances
 
 Pseudo flow:
 
 loop forever
 
 ```
+while local concurrency is below MaxConcurrentJobs:
+
 select one job where Status = Pending and Attempts < MaxAttempts
 
 order by Id ASC
 
 attempt atomic acquisition
+
+start processing task without blocking the polling loop
 
 after acquisition, check job age
 
@@ -286,7 +315,7 @@ Concept:
 
 The worker must retry the loop.
 
-This guarantees that only one worker acquires the job.
+This guarantees that only one worker acquires the job, even when multiple processes or containers poll at the same time.
 
 `CreatedAt` remains in the schema for diagnostics but is not used for job ordering.
 
@@ -300,7 +329,7 @@ Worker should:
 
 log that the job is being processed
 
-wait 1–2 seconds
+wait 1500 ms
 
 mark job as completed
 
@@ -358,6 +387,8 @@ Job completed
 
 Job failed
 
+Do not log every polling cycle when no job is found.
+
 ---
 
 # README Update
@@ -414,6 +445,9 @@ Pending → Processing → Completed
 8. Retry behavior follows `MaxAttempts`
 9. FIFO ordering uses `Id ASC`
 10. Jobs older than `MaxJobAgeMinutes` are marked `Failed` without processing
+11. Worker respects `MaxConcurrentJobs`
+12. Polling delay includes jitter
+13. Polling index exists for the queue query
 
 ---
 

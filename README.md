@@ -80,6 +80,8 @@ Database__ConnectionString=
 
 Worker__PollIntervalMs=
 
+Worker__MaxConcurrentJobs=
+
 Worker__MaxAttempts=
 
 Worker__MaxJobAgeMinutes=
@@ -117,6 +119,7 @@ The application connects to PostgreSQL via the configured connection string.
 Worker configuration uses strongly-typed options:
 
 - `Worker:PollIntervalMs` default `1000`
+- `Worker:MaxConcurrentJobs` default `4`
 - `Worker:MaxAttempts` default `2`
 - `Worker:MaxJobAgeMinutes` default `30`
 
@@ -158,15 +161,20 @@ Running the API in Docker during development is not required and may slow down d
 Worker behavior after Iteration 02:
 
 1. Webhook stores new jobs as `Pending`.
-2. Workers poll the database using FIFO ordering with `ORDER BY Id ASC`.
-3. A worker selects one pending job with attempts below `MaxAttempts`.
-4. Workers only consider jobs where `Attempts < MaxAttempts`.
+2. Workers poll the database with a jittered delay and use the polling index `IX_Jobs_Status_Attempts_Id`.
+3. Each worker process may run up to `MaxConcurrentJobs` jobs in parallel.
+4. Workers select pending jobs with `Attempts < MaxAttempts` using FIFO ordering with `ORDER BY Id ASC`.
 5. A worker tries atomic acquisition by changing `Pending -> Processing`.
 6. `Attempts` increments when the job is acquired for processing.
 7. If processing succeeds, the job becomes `Completed`.
 8. If processing fails and `Attempts < MaxAttempts`, the job returns to `Pending`.
 9. If processing fails and `Attempts >= MaxAttempts`, the job becomes `Failed`.
 10. If a job age exceeds `MaxJobAgeMinutes`, the worker marks it `Failed` without processing it.
+
+Queue safety:
+
+- Multiple application instances are safe because job acquisition uses an atomic database update.
+- Each job execution uses its own service scope and `DbContext`.
 
 Iteration 02 limitation:
 

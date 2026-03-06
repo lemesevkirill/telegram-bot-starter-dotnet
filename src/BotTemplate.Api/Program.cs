@@ -1,4 +1,5 @@
 using BotTemplate.Api.Endpoints;
+using BotTemplate.Api.Workers;
 using BotTemplate.Core.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -67,11 +68,19 @@ public sealed class Program
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        builder.Services
+            .AddOptions<WorkerOptions>()
+            .Bind(builder.Configuration.GetSection(WorkerOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         builder.Services.AddDbContext<AppDbContext>((serviceProvider, options) =>
         {
             var databaseOptions = serviceProvider.GetRequiredService<IOptions<DatabaseOptions>>().Value;
             options.UseNpgsql(databaseOptions.ConnectionString);
         });
+
+        builder.Services.AddHostedService<JobWorker>();
     }
 
     private static void ConfigurePipeline(WebApplication app)
@@ -86,12 +95,17 @@ public sealed class Program
         var logger = app.Services.GetRequiredService<ILogger<Program>>();
         var telegram = app.Services.GetRequiredService<IOptions<TelegramOptions>>().Value;
         var database = app.Services.GetRequiredService<IOptions<DatabaseOptions>>().Value;
+        var worker = app.Services.GetRequiredService<IOptions<WorkerOptions>>().Value;
 
         logger.LogInformation("[CONFIG] Environment = {Value}", app.Environment.EnvironmentName);
         logger.LogInformation("[CONFIG] ASPNETCORE_URLS = {Value}", Prefix(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")));
         logger.LogInformation("[CONFIG] Telegram.BotToken = {Value}", Prefix(telegram.BotToken));
         logger.LogInformation("[CONFIG] Telegram.WebhookSecret = {Value}", Prefix(telegram.WebhookSecret));
         logger.LogInformation("[CONFIG] Database.ConnectionString = {Value}", Prefix(database.ConnectionString));
+        logger.LogInformation("[CONFIG] Worker.PollIntervalMs = {Value}", worker.PollIntervalMs);
+        logger.LogInformation("[CONFIG] Worker.MaxConcurrentJobs = {Value}", worker.MaxConcurrentJobs);
+        logger.LogInformation("[CONFIG] Worker.MaxAttempts = {Value}", worker.MaxAttempts);
+        logger.LogInformation("[CONFIG] Worker.MaxJobAgeMinutes = {Value}", worker.MaxJobAgeMinutes);
     }
 
     private static string Prefix(string? value)

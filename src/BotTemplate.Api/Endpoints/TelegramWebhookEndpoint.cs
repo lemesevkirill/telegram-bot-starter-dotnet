@@ -19,8 +19,6 @@ public static class TelegramWebhookEndpoint
 
     private static async Task<IResult> HandleAsync(HttpRequest request, AppDbContext dbContext, IOptions<TelegramOptions> telegramOptions)
     {
-        Console.WriteLine("HELLO WORLD");
-
         if (!request.Headers.TryGetValue("X-Telegram-Bot-Api-Secret-Token", out var secretTokenHeader) ||
             secretTokenHeader != telegramOptions.Value.WebhookSecret)
         {
@@ -52,13 +50,17 @@ public static class TelegramWebhookEndpoint
             return Results.BadRequest();
         }
 
+        var now = DateTime.UtcNow;
         var job = new Job
         {
             ChatId = chatId.Value,
             UserId = userId.Value,
             UpdatePayload = rawBody,
-            Status = "pending",
-            CreatedAt = DateTime.UtcNow
+            Status = JobStatus.Pending,
+            Attempts = 0,
+            LastError = null,
+            CreatedAt = now,
+            UpdatedAt = now
         };
 
         dbContext.Jobs.Add(job);
