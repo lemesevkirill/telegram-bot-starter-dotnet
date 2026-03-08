@@ -98,6 +98,7 @@ public sealed class JobWorker(
 
         if (candidateJobId is null)
         {
+            logger.LogInformation("No Job picked - no candidate");
             return new AcquisitionResult(AcquisitionResultKind.NoCandidate, null, null);
         }
 
@@ -113,6 +114,7 @@ public sealed class JobWorker(
 
         if (rowsAffected == 0)
         {
+            logger.LogInformation("No Job picked - lost race");
             return new AcquisitionResult(AcquisitionResultKind.LostRace, null, null);
         }
 
@@ -132,15 +134,16 @@ public sealed class JobWorker(
             {
                 job.Status = JobStatus.Failed;
                 job.UpdatedAt = DateTime.UtcNow;
+                job.LastError = $"Job expired: age exceeded {workerOptions.MaxJobAgeMinutes} minutes";
                 await dbContext.SaveChangesAsync(cancellationToken);
-                logger.LogWarning("Job failed {JobId}", job.Id);
+                logger.LogWarning("Job failed {JobId}: IsJobExpired=true", job.Id);
                 return;
             }
 
             try
             {
                 logger.LogInformation("Processing started {JobId}", job.Id);
-                await Task.Delay(1500, cancellationToken);
+                await Task.Delay(1500, cancellationToken);                
 
                 job.Status = JobStatus.Completed;
                 job.LastError = null;
