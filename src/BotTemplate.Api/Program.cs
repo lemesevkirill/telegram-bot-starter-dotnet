@@ -2,6 +2,7 @@ using BotTemplate.Api.Endpoints;
 using BotTemplate.Api.Execution;
 using BotTemplate.Api.LLM;
 using BotTemplate.Api.Services;
+using BotTemplate.Api.TTS;
 using BotTemplate.Api.Workers;
 using BotTemplate.Core.Configuration;
 using Microsoft.EntityFrameworkCore;
@@ -84,6 +85,12 @@ public sealed class Program
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        builder.Services
+            .AddOptions<TTSOptions>()
+            .Bind(builder.Configuration.GetSection(TTSOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         builder.Services.AddDbContext<AppDbContext>((serviceProvider, options) =>
         {
             var databaseOptions = serviceProvider.GetRequiredService<IOptions<DatabaseOptions>>().Value;
@@ -105,6 +112,13 @@ public sealed class Program
             client.Timeout = TimeSpan.FromSeconds(llmOptions.TimeoutSeconds);
         });
         builder.Services.AddScoped<ILLMService>(serviceProvider => serviceProvider.GetRequiredService<OpenAiLLMService>());
+        builder.Services.AddHttpClient<OpenAiTTSService>((serviceProvider, client) =>
+        {
+            var ttsOptions = serviceProvider.GetRequiredService<IOptions<TTSOptions>>().Value;
+            client.BaseAddress = new Uri("https://api.openai.com/v1/");
+            client.Timeout = TimeSpan.FromSeconds(ttsOptions.TimeoutSeconds);
+        });
+        builder.Services.AddScoped<ITTSService>(serviceProvider => serviceProvider.GetRequiredService<OpenAiTTSService>());
         builder.Services.AddScoped<IJobExecutor, TelegramJobExecutor>();
 
         builder.Services.AddHostedService<JobWorker>();
@@ -124,6 +138,7 @@ public sealed class Program
         var database = app.Services.GetRequiredService<IOptions<DatabaseOptions>>().Value;
         var worker = app.Services.GetRequiredService<IOptions<WorkerOptions>>().Value;
         var llm = app.Services.GetRequiredService<IOptions<LLMOptions>>().Value;
+        var tts = app.Services.GetRequiredService<IOptions<TTSOptions>>().Value;
 
         logger.LogInformation("[CONFIG] Environment = {Value}", app.Environment.EnvironmentName);
         logger.LogInformation("[CONFIG] ASPNETCORE_URLS = {Value}", Prefix(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")));
@@ -138,6 +153,12 @@ public sealed class Program
         logger.LogInformation("[CONFIG] LLM.BaseUrl = {Value}", llm.BaseUrl);
         logger.LogInformation("[CONFIG] LLM.TimeoutSeconds = {Value}", llm.TimeoutSeconds);
         logger.LogInformation("[CONFIG] LLM.ApiKey = {Value}", Prefix(llm.ApiKey));
+        logger.LogInformation("[CONFIG] TTS.Model = {Value}", tts.Model);
+        logger.LogInformation("[CONFIG] TTS.Voice = {Value}", tts.Voice);
+        logger.LogInformation("[CONFIG] TTS.Format = {Value}", tts.Format);
+        logger.LogInformation("[CONFIG] TTS.TimeoutSeconds = {Value}", tts.TimeoutSeconds);
+        logger.LogInformation("[CONFIG] TTS.MaxInputLength = {Value}", tts.MaxInputLength);
+        logger.LogInformation("[CONFIG] TTS.ApiKey = {Value}", Prefix(tts.ApiKey));
     }
 
     private static string Prefix(string? value)

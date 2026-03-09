@@ -47,6 +47,13 @@ A production-oriented skeleton for building Telegram bots using:
 - Prompt construction centralized (`PromptBuilder`)
 - Structured LLM response type (`LLMResult`)
 
+### ✅ Iteration 05
+- TTS layer introduced (`ITTSService` + `OpenAiTTSService`)
+- Stream-based Telegram audio upload via `TelegramSender.SendAudioAsync`
+- Executor pipeline updated to `LLM -> TTS -> text + audio`
+- TTS input length cap added via `TTSOptions.MaxInputLength`
+- Audio metadata DTO introduced (`AudioMessage`) so executor controls title/caption/performer/file name
+
 ---
 
 ## Planned Architecture
@@ -86,6 +93,10 @@ TelegramJobExecutor
 ILLMService / OpenAiLLMService
 ↓
 OpenAI API
+↓
+ITTSService / OpenAiTTSService
+↓
+OpenAI TTS API
 ↓
 TelegramSender
 
@@ -130,6 +141,18 @@ LLM__Model=
 LLM__BaseUrl=
 
 LLM__TimeoutSeconds=
+
+TTS__ApiKey=
+
+TTS__Model=
+
+TTS__Voice=
+
+TTS__Format=
+
+TTS__TimeoutSeconds=
+
+TTS__MaxInputLength=
 
 
 ---
@@ -186,7 +209,7 @@ Running the API in Docker during development is not required and may slow down d
 - [x] Iteration 02 — Background worker
 - [x] Iteration 03 — Telegram response sending
 - [x] Iteration 04 — LLM integration
-- [ ] Iteration 05 — TTS integration
+- [x] Iteration 05 — TTS integration
 - [ ] Iteration 06 — Observability (OpenTelemetry)
 
 ---
@@ -244,3 +267,16 @@ Iteration 02 limitation:
 This repository is not a framework.
 
 It is a minimal, production-ready foundation for building reliable Telegram bots with long-running task processing.
+
+## Audio Messaging
+
+Telegram audio sending uses `AudioMessage` as a minimal DTO:
+
+- `Audio` (`Stream`, required)
+- `Title`
+- `Performer`
+- `Caption`
+- `FileName`
+
+`TelegramSender` stays transport-only and accepts `AudioMessage`.
+`TelegramJobExecutor` constructs `AudioMessage`, which keeps audio metadata decisions in the execution layer.
