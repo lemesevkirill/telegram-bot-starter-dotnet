@@ -1,10 +1,8 @@
 using BotTemplate.Core.Configuration;
 using BotTemplate.Core.Jobs;
+using BotTemplate.Api.Execution;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using System.Text.Json;
-using BotTemplate.Api.Services;
-using Telegram.Bot.Types;
 
 namespace BotTemplate.Api.Workers;
 
@@ -145,35 +143,8 @@ public sealed class JobWorker(
 
             try
             {
-                var telegramSender = scope.ServiceProvider.GetRequiredService<TelegramSender>();
-                logger.LogInformation("Processing started {JobId}", job.Id);
-                var update = JsonSerializer.Deserialize<Update>(
-                    job.UpdatePayload,
-                    new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    });
-                var text = update?.Message?.Text;
-
-                if (text is not null)
-                {
-                    logger.LogInformation("Sending typing indicator {JobId}", job.Id);
-                    await telegramSender.SendTypingAsync(job.ChatId, cancellationToken);
-
-                    logger.LogInformation("ProcessAcquiredJobAsync Delay {JobId}", job.Id);
-                    await Task.Delay(2000, cancellationToken);
-
-                    logger.LogInformation("Sending Telegram message {JobId}", job.Id);
-                    await telegramSender.SendTextMessageAsync(
-                        job.ChatId,
-                        $"Got your message:\n\n{text}",
-                        cancellationToken);
-                }
-                else
-                {
-                    logger.LogInformation("Update's text is null, {JobId}", job.Id);
-                    logger.LogInformation("Payload {Payload}", job.UpdatePayload);
-                }
+                var jobExecutor = scope.ServiceProvider.GetRequiredService<IJobExecutor>();
+                await jobExecutor.ExecuteAsync(job, cancellationToken);
 
                 job.Status = JobStatus.Completed;
                 job.LastError = null;

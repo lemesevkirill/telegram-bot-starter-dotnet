@@ -1,4 +1,6 @@
 using BotTemplate.Api.Endpoints;
+using BotTemplate.Api.Execution;
+using BotTemplate.Api.LLM;
 using BotTemplate.Api.Services;
 using BotTemplate.Api.Workers;
 using BotTemplate.Core.Configuration;
@@ -76,6 +78,12 @@ public sealed class Program
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        builder.Services
+            .AddOptions<LLMOptions>()
+            .Bind(builder.Configuration.GetSection(LLMOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         builder.Services.AddDbContext<AppDbContext>((serviceProvider, options) =>
         {
             var databaseOptions = serviceProvider.GetRequiredService<IOptions<DatabaseOptions>>().Value;
@@ -89,6 +97,15 @@ public sealed class Program
         });
 
         builder.Services.AddSingleton<TelegramSender>();
+        builder.Services.AddScoped<PromptBuilder>();
+        builder.Services.AddHttpClient<OpenAiLLMService>((serviceProvider, client) =>
+        {
+            var llmOptions = serviceProvider.GetRequiredService<IOptions<LLMOptions>>().Value;
+            client.BaseAddress = new Uri(llmOptions.BaseUrl);
+            client.Timeout = TimeSpan.FromSeconds(llmOptions.TimeoutSeconds);
+        });
+        builder.Services.AddScoped<ILLMService>(serviceProvider => serviceProvider.GetRequiredService<OpenAiLLMService>());
+        builder.Services.AddScoped<IJobExecutor, TelegramJobExecutor>();
 
         builder.Services.AddHostedService<JobWorker>();
     }
@@ -106,6 +123,7 @@ public sealed class Program
         var telegram = app.Services.GetRequiredService<IOptions<TelegramOptions>>().Value;
         var database = app.Services.GetRequiredService<IOptions<DatabaseOptions>>().Value;
         var worker = app.Services.GetRequiredService<IOptions<WorkerOptions>>().Value;
+        var llm = app.Services.GetRequiredService<IOptions<LLMOptions>>().Value;
 
         logger.LogInformation("[CONFIG] Environment = {Value}", app.Environment.EnvironmentName);
         logger.LogInformation("[CONFIG] ASPNETCORE_URLS = {Value}", Prefix(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")));
@@ -116,6 +134,10 @@ public sealed class Program
         logger.LogInformation("[CONFIG] Worker.MaxConcurrentJobs = {Value}", worker.MaxConcurrentJobs);
         logger.LogInformation("[CONFIG] Worker.MaxAttempts = {Value}", worker.MaxAttempts);
         logger.LogInformation("[CONFIG] Worker.MaxJobAgeMinutes = {Value}", worker.MaxJobAgeMinutes);
+        logger.LogInformation("[CONFIG] LLM.Model = {Value}", llm.Model);
+        logger.LogInformation("[CONFIG] LLM.BaseUrl = {Value}", llm.BaseUrl);
+        logger.LogInformation("[CONFIG] LLM.TimeoutSeconds = {Value}", llm.TimeoutSeconds);
+        logger.LogInformation("[CONFIG] LLM.ApiKey = {Value}", Prefix(llm.ApiKey));
     }
 
     private static string Prefix(string? value)

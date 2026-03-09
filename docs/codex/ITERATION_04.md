@@ -1,5 +1,7 @@
 # ITERATION 04 — JobExecutor + LLM Integration
 
+Status: Completed
+
 ## Goal
 
 Introduce an execution layer responsible for job processing and orchestration.
@@ -50,9 +52,11 @@ IJobExecutor
 ↓
 TelegramJobExecutor
 ↓
-LLMService
+ILLMService
 ↓
-OpenAI Client
+OpenAiLLMService
+↓
+OpenAI API
 ↓
 TelegramSender
 
@@ -116,7 +120,7 @@ Responsibilities:
 - deserialize UpdatePayload
 - extract Telegram message
 - send typing indicator
-- call LLMService
+- call ILLMService
 - send translated response
 
 Exceptions must NOT be swallowed.
@@ -132,14 +136,15 @@ Introduce a dedicated service responsible for interacting with the LLM.
 Create:
 
 ILLMService
-LLMService
+OpenAiLLMService
 
 Location suggestion:
 
 BotTemplate.Api/LLM/
 
     ILLMService.cs
-    LLMService.cs
+    OpenAiLLMService.cs
+    LLMOptions.cs
 
 Purpose:
 
@@ -237,10 +242,7 @@ The service must return only the translated text.
 
 # OpenAI Client
 
-Use the OpenAI API via either:
-
-- official OpenAI .NET SDK
-- HttpClient REST call
+Use HttpClient REST call to OpenAI API.
 
 Recommended model:
 
@@ -253,6 +255,23 @@ The request must:
 - extract generated text
 
 Minimal error handling is acceptable for this iteration.
+
+## LLMOptions
+
+Configuration class:
+
+LLMOptions
+
+Section:
+
+LLM
+
+Properties:
+
+- ApiKey (required)
+- Model (default `gpt-4.1-mini`)
+- BaseUrl (default `https://api.openai.com/v1/`)
+- TimeoutSeconds (default `60`)
 
 ---
 
@@ -267,7 +286,7 @@ When a job is executed:
        return
 4. If message text exists:
        send typing indicator
-       call LLMService.TranslateAsync(text)
+       call ILLMService.TranslateToGermanAsync(text)
        send Telegram response
 
 Example interaction:
@@ -287,13 +306,13 @@ Hallo, wie geht es dir?
 Register services:
 
 IJobExecutor → TelegramJobExecutor
-ILLMService → LLMService
+ILLMService → OpenAiLLMService
 
 Recommended lifecycle:
 
 Scoped
 
-LLMService dependencies may include:
+OpenAiLLMService dependencies may include:
 
 - HttpClient
 - ILogger
@@ -347,7 +366,7 @@ Expected runtime behavior:
 3. Worker acquires job
 4. Worker calls JobExecutor
 5. Executor sends typing indicator
-6. Executor calls LLMService
+6. Executor calls ILLMService
 7. LLM translates text
 8. Executor sends translated message
 9. Worker marks job Completed
@@ -364,7 +383,7 @@ Worker → infrastructure
 
 JobExecutor → orchestration
 
-LLMService → LLM interaction
+ILLMService / OpenAiLLMService → LLM interaction
 
 PromptBuilder → prompt construction
 

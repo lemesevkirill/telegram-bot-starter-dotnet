@@ -30,6 +30,23 @@ A production-oriented skeleton for building Telegram bots using:
 - `JobStatus` enum stored as `int`
 - Strongly-typed configuration via Options pattern
 
+### ✅ Iteration 02
+- Background worker implemented as `BackgroundService`
+- Atomic job acquisition and retry lifecycle
+- Polling index `IX_Jobs_Status_Attempts_Id`
+- Configurable concurrency and polling via `WorkerOptions`
+
+### ✅ Iteration 03
+- `UpdateId` deduplication with unique database constraint
+- Telegram sender integration (`TelegramSender`)
+- Worker sends typing indicator and replies through Telegram API
+
+### ✅ Iteration 04
+- Execution layer introduced (`IJobExecutor` + `TelegramJobExecutor`)
+- LLM integration introduced (`ILLMService` + `OpenAiLLMService`)
+- Prompt construction centralized (`PromptBuilder`)
+- Structured LLM response type (`LLMResult`)
+
 ---
 
 ## Planned Architecture
@@ -51,6 +68,26 @@ No message brokers.
 Single PostgreSQL database.
 Workers run as `BackgroundService` inside the same ASP.NET Core process.
 Multiple application instances are allowed and coordinate through atomic database updates.
+
+Current runtime architecture:
+
+Telegram
+↓
+Webhook
+↓
+Jobs table
+↓
+Worker
+↓
+IJobExecutor
+↓
+TelegramJobExecutor
+↓
+ILLMService / OpenAiLLMService
+↓
+OpenAI API
+↓
+TelegramSender
 
 ---
 
@@ -85,6 +122,14 @@ Worker__MaxConcurrentJobs=
 Worker__MaxAttempts=
 
 Worker__MaxJobAgeMinutes=
+
+LLM__ApiKey=
+
+LLM__Model=
+
+LLM__BaseUrl=
+
+LLM__TimeoutSeconds=
 
 
 ---
@@ -139,8 +184,8 @@ Running the API in Docker during development is not required and may slow down d
 - [x] Iteration 00 — Solution skeleton
 - [x] Iteration 01 — Webhook + EF Core
 - [x] Iteration 02 — Background worker
-- [ ] Iteration 03 — Telegram response sending (in progress)
-- [ ] Iteration 04 — LLM integration
+- [x] Iteration 03 — Telegram response sending
+- [x] Iteration 04 — LLM integration
 - [ ] Iteration 05 — TTS integration
 - [ ] Iteration 06 — Observability (OpenTelemetry)
 
