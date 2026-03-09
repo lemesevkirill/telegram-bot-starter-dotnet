@@ -4,6 +4,8 @@ public sealed class Job
 {
     public long Id { get; set; }
 
+    public long UpdateId { get; set; }
+
     public long ChatId { get; set; }
 
     public long UserId { get; set; }

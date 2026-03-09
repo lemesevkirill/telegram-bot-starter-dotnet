@@ -3,8 +3,10 @@ using BotTemplate.Core.Configuration;
 using BotTemplate.Core.Jobs;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using Telegram.Bot.Types;
 
 namespace BotTemplate.Api.Endpoints;
@@ -17,7 +19,11 @@ public static class TelegramWebhookEndpoint
         return app;
     }
 
-    private static async Task<IResult> HandleAsync(HttpRequest request, AppDbContext dbContext, IOptions<TelegramOptions> telegramOptions)
+    private static async Task<IResult> HandleAsync(
+        HttpRequest request,
+        AppDbContext dbContext,
+        IOptions<TelegramOptions> telegramOptions,
+        CancellationToken cancellationToken)
     {
         if (!request.Headers.TryGetValue("X-Telegram-Bot-Api-Secret-Token", out var secretTokenHeader) ||
             secretTokenHeader != telegramOptions.Value.WebhookSecret)
@@ -42,10 +48,11 @@ public static class TelegramWebhookEndpoint
             return Results.BadRequest();
         }
 
+        var updateId = update?.Id;
         var chatId = update?.Message?.Chat.Id;
         var userId = update?.Message?.From?.Id;
 
-        if (chatId is null || userId is null)
+        if (updateId is null || chatId is null || userId is null)
         {
             return Results.BadRequest();
         }
@@ -53,6 +60,7 @@ public static class TelegramWebhookEndpoint
         var now = DateTime.UtcNow;
         var job = new Job
         {
+            UpdateId = updateId.Value,
             ChatId = chatId.Value,
             UserId = userId.Value,
             UpdatePayload = rawBody,
@@ -64,7 +72,16 @@ public static class TelegramWebhookEndpoint
         };
 
         dbContext.Jobs.Add(job);
-        await dbContext.SaveChangesAsync();
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex)
+            when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            return Results.Ok();
+        }
 
         return Results.Ok();
     }

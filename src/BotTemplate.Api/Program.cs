@@ -1,8 +1,10 @@
 using BotTemplate.Api.Endpoints;
+using BotTemplate.Api.Services;
 using BotTemplate.Api.Workers;
 using BotTemplate.Core.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Telegram.Bot;
 
 namespace BotTemplate.Api;
 
@@ -79,6 +81,14 @@ public sealed class Program
             var databaseOptions = serviceProvider.GetRequiredService<IOptions<DatabaseOptions>>().Value;
             options.UseNpgsql(databaseOptions.ConnectionString);
         });
+
+        builder.Services.AddSingleton<TelegramBotClient>(serviceProvider =>
+        {
+            var telegramOptions = serviceProvider.GetRequiredService<IOptions<TelegramOptions>>().Value;
+            return new TelegramBotClient(telegramOptions.BotToken);
+        });
+
+        builder.Services.AddSingleton<TelegramSender>();
 
         builder.Services.AddHostedService<JobWorker>();
     }
