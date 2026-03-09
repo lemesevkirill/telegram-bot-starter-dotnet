@@ -1,212 +1,378 @@
-# ITERATION 04 — JobExecutor (Execution Layer)
+# ITERATION 04 — JobExecutor + LLM Integration
 
 ## Goal
 
-Introduce an execution layer between the worker and Telegram transport.
+Introduce an execution layer responsible for job processing and orchestration.
 
-The worker must no longer contain message-processing logic.
+The worker must remain an infrastructure component responsible only for:
 
-Instead, the worker will delegate job execution to a dedicated component:
+- job acquisition
+- retry and lifecycle management
+- concurrency control
+
+All job execution logic must be delegated to a new component:
 
 JobExecutor.
 
-This prepares the architecture for future features such as:
+Iteration 04 also introduces the first real execution pipeline using an LLM service.
 
-- LLM integration
-- TTS generation
-- web crawling
-- multi-step orchestration
-- richer Telegram interactions
+The bot will translate incoming Telegram messages to German using the OpenAI API.
 
-Iteration 04 is strictly an architectural refactor.
-
-No new product features are introduced.
-
-The observable behavior of the bot must remain identical to Iteration 03.
+This provides a realistic processing step while keeping the example simple.
 
 ---
 
-## Target Architecture
+# Target Architecture
 
 Current architecture after Iteration 03:
 
-Telegram  
-↓  
-Webhook  
-↓  
-Jobs table  
-↓  
-Worker  
-↓  
-TelegramSender  
+Telegram
+↓
+Webhook
+↓
+Jobs table
+↓
+Worker
+↓
+TelegramSender
 
 Target architecture after Iteration 04:
 
-Telegram  
-↓  
-Webhook  
-↓  
-Jobs table  
-↓  
-Worker  
-↓  
-JobExecutor  
-↓  
-TelegramSender  
+Telegram
+↓
+Webhook
+↓
+Jobs table
+↓
+Worker
+↓
+IJobExecutor
+↓
+TelegramJobExecutor
+↓
+LLMService
+↓
+OpenAI Client
+↓
+TelegramSender
 
-The worker becomes responsible only for:
-
-- job acquisition
-- retry/state management
-- concurrency limits
-- calling JobExecutor
-
-The worker must not implement business logic.
+Responsibilities are separated between infrastructure and execution layers.
 
 ---
 
-## New Component: JobExecutor
+# Worker Responsibilities
 
-Introduce a new service:
+Worker remains infrastructure-only.
 
-JobExecutor
+Responsible for:
 
-Location suggestion:
+- polling jobs
+- atomic acquisition
+- retry logic
+- job lifecycle
+- concurrency limits
+- invoking JobExecutor
 
-BotTemplate.Api/Execution/JobExecutor.cs
-
-Responsibilities:
+Worker must NOT:
 
 - parse UpdatePayload
-- extract message text
-- perform simulated processing
-- send Telegram typing indicator
-- send Telegram response
-
-The logic currently implemented inside JobWorker must be moved here.
+- call LLM APIs
+- inspect Telegram message content
+- send Telegram messages directly
 
 ---
 
-## JobExecutor Interface
+# Execution Layer
 
-Create an interface:
+## Interface
+
+Create interface:
 
 IJobExecutor
 
-Example signature:
+Signature:
 
-Task ExecuteAsync(Job job, CancellationToken cancellationToken)
+Task ExecuteAsync(Job job, CancellationToken ct)
 
-This interface allows future execution engines or pipelines to replace the executor.
+The worker calls the executor for every acquired job.
 
 ---
 
-## JobExecutor Implementation
+## Implementation
 
-The default implementation must reproduce the current behavior from Iteration 03.
+Create implementation:
+
+TelegramJobExecutor
+
+Location suggestion:
+
+BotTemplate.Api/Execution/
+
+    IJobExecutor.cs
+    TelegramJobExecutor.cs
+
+Responsibilities:
+
+- deserialize UpdatePayload
+- extract Telegram message
+- send typing indicator
+- call LLMService
+- send translated response
+
+Exceptions must NOT be swallowed.
+
+They must propagate to the worker so retry logic continues to function.
+
+---
+
+# LLM Integration
+
+Introduce a dedicated service responsible for interacting with the LLM.
+
+Create:
+
+ILLMService
+LLMService
+
+Location suggestion:
+
+BotTemplate.Api/LLM/
+
+    ILLMService.cs
+    LLMService.cs
+
+Purpose:
+
+Encapsulate all interaction with the OpenAI API.
+
+Responsibilities:
+
+- build prompts
+- call OpenAI API
+- parse responses
+- return LLMResult
+
+JobExecutor must NOT call OpenAI directly.
+
+---
+
+# Prompt Builder
+
+Introduce a minimal component responsible for constructing prompts.
+
+Create:
+
+PromptBuilder
+
+Location:
+
+BotTemplate.Api/LLM/PromptBuilder.cs
+
+Purpose:
+
+Centralize prompt construction logic.
+
+Example behavior:
+
+Translate the following text to German.
+
+Text:
+{user_message}
+
+Example method:
+
+string BuildGermanTranslationPrompt(string text)
+
+This prevents prompt strings from being scattered across the codebase.
+
+---
+
+# LLM Result Type
+
+Introduce a simple result type returned by the LLM service.
+
+Create:
+
+LLMResult
+
+Location:
+
+BotTemplate.Api/LLM/LLMResult.cs
+
+Example structure:
+
+public sealed class LLMResult
+{
+    public string Text { get; init; } = "";
+}
+
+The service returns this object instead of raw strings.
+
+This allows future extensions such as:
+
+- token usage
+- model metadata
+- structured outputs
+
+without breaking the interface.
+
+---
+
+# LLM Behavior
+
+For this iteration the LLM performs a simple task:
+
+Translate user text to German.
+
+Prompt example:
+
+Translate the following text to German.
+
+Text:
+{user_message}
+
+The service must return only the translated text.
+
+---
+
+# OpenAI Client
+
+Use the OpenAI API via either:
+
+- official OpenAI .NET SDK
+- HttpClient REST call
+
+Recommended model:
+
+gpt-4.1-mini
+
+The request must:
+
+- send the translation prompt
+- receive completion
+- extract generated text
+
+Minimal error handling is acceptable for this iteration.
+
+---
+
+# Execution Flow
+
+When a job is executed:
+
+1. JobExecutor deserializes UpdatePayload
+2. Extracts Telegram message text
+3. If message text is null:
+       log
+       return
+4. If message text exists:
+       send typing indicator
+       call LLMService.TranslateAsync(text)
+       send Telegram response
+
+Example interaction:
+
+User sends:
+
+Hello, how are you?
+
+Bot replies:
+
+Hallo, wie geht es dir?
+
+---
+
+# Dependency Injection
+
+Register services:
+
+IJobExecutor → TelegramJobExecutor
+ILLMService → LLMService
+
+Recommended lifecycle:
+
+Scoped
+
+LLMService dependencies may include:
+
+- HttpClient
+- ILogger
+- PromptBuilder
+
+---
+
+# Worker Changes
+
+Modify JobWorker.
+
+Replace message processing logic with executor invocation.
 
 Execution flow:
-
-1. Deserialize UpdatePayload using System.Text.Json
-2. Extract message text
-3. If text is null:
-   - log
-   - return without sending response
-4. If text exists:
-   - send typing indicator
-   - wait ~2 seconds
-   - send response message:
-     "Got your message:\n\n{text}"
-
-Exceptions must not be swallowed.
-
-They must propagate to the worker so that the retry mechanism continues to work.
-
----
-
-## Worker Changes
-
-Modify JobWorker:
-
-Replace the current processing block with a call to the executor.
-
-Example flow:
 
 1. Acquire job
 2. Check MaxJobAgeMinutes
 3. Call executor:
 
-await jobExecutor.ExecuteAsync(job, cancellationToken)
+   await jobExecutor.ExecuteAsync(job, ct)
 
 4. If successful → mark Completed
-5. If exception → existing retry logic applies
+5. If exception → retry logic applies
 
-The worker must not:
-
-- deserialize UpdatePayload
-- inspect message text
-- call TelegramSender directly
-
-All such logic must live in JobExecutor.
+Worker must remain infrastructure-only.
 
 ---
 
-## Dependency Injection
+# Constraints
 
-Register:
+Iteration 04 must NOT introduce:
 
-IJobExecutor → JobExecutor
-
-Use standard DI registration in Program.cs.
-
-Lifecycle:
-
-Scoped or Singleton is acceptable for this iteration.
-
----
-
-## Constraints
-
-Iteration 04 must not introduce:
-
-- orchestration frameworks
+- workflow engines
+- tool frameworks
 - command routing
-- pipeline engines
-- domain layers
-- extra abstractions
+- pipeline DSL
+- multiple executor implementations
 
 Only one executor implementation is required.
 
-Keep the design minimal.
+Keep the architecture minimal and pragmatic.
 
 ---
 
-## Verification
+# Verification
 
-Behavior must remain identical to Iteration 03.
+Expected runtime behavior:
 
-When a Telegram user sends a message:
+1. Telegram message arrives
+2. Webhook stores job
+3. Worker acquires job
+4. Worker calls JobExecutor
+5. Executor sends typing indicator
+6. Executor calls LLMService
+7. LLM translates text
+8. Executor sends translated message
+9. Worker marks job Completed
 
-1. webhook stores job
-2. worker acquires job
-3. worker calls JobExecutor
-4. executor sends typing indicator
-5. executor waits ~2 seconds
-6. executor sends reply
-7. worker marks job Completed
-
-No changes to retry behavior, logging, or job lifecycle.
+Retry behavior must remain unchanged.
 
 ---
 
-## Expected Outcome
+# Expected Outcome
 
-The worker becomes infrastructure-only.
+After Iteration 04:
 
-All execution logic lives inside JobExecutor.
+Worker → infrastructure
 
-This prepares the codebase for future iterations that will introduce:
+JobExecutor → orchestration
 
-- LLM processing
-- TTS pipelines
-- multi-step job orchestration
+LLMService → LLM interaction
+
+PromptBuilder → prompt construction
+
+LLMResult → structured LLM response
+
+This prepares the system for future features:
+
+- richer LLM pipelines
+- TTS generation
+- crawling
+- multi-step orchestration
