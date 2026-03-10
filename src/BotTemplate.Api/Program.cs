@@ -10,6 +10,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
+using Serilog;
+using Serilog.Sinks.Grafana.Loki;
 using Telegram.Bot;
 
 namespace BotTemplate.Api;
@@ -19,6 +21,8 @@ public sealed class Program
     public static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
+
+        ConfigureSerilog(builder);
 
         builder.Logging.ClearProviders();
         builder.Logging.AddSimpleConsole(options =>
@@ -97,6 +101,12 @@ public sealed class Program
         builder.Services
             .AddOptions<ObservabilityOptions>()
             .Bind(builder.Configuration.GetSection(ObservabilityOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        builder.Services
+            .AddOptions<LokiOptions>()
+            .Bind(builder.Configuration.GetSection(LokiOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
@@ -185,6 +195,7 @@ public sealed class Program
         var llm = app.Services.GetRequiredService<IOptions<LLMOptions>>().Value;
         var tts = app.Services.GetRequiredService<IOptions<TTSOptions>>().Value;
         var observability = app.Services.GetRequiredService<IOptions<ObservabilityOptions>>().Value;
+        var loki = app.Services.GetRequiredService<IOptions<LokiOptions>>().Value;
 
         logger.LogInformation("[CONFIG] Environment = {Value}", app.Environment.EnvironmentName);
         logger.LogInformation("[CONFIG] ASPNETCORE_URLS = {Value}", Prefix(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")));
@@ -208,6 +219,52 @@ public sealed class Program
         logger.LogInformation("[CONFIG] Observability.ServiceName = {Value}", observability.ServiceName);
         logger.LogInformation("[CONFIG] Observability.OtlpEndpoint = {Value}", observability.OtlpEndpoint);
         logger.LogInformation("[CONFIG] Observability.OtlpApiKeyConfigured = {Value}", !string.IsNullOrWhiteSpace(observability.OtlpApiKey));
+        logger.LogInformation("[CONFIG] Loki.Enabled = {Value}", loki.Enabled);
+        logger.LogInformation("[CONFIG] Loki.Endpoint = {Value}", loki.Endpoint);
+        logger.LogInformation("[CONFIG] Loki.ServiceName = {Value}", loki.ServiceName);
+        logger.LogInformation("[CONFIG] Loki.UsernameConfigured = {Value}", !string.IsNullOrWhiteSpace(loki.Username));
+        logger.LogInformation("[CONFIG] Loki.PasswordConfigured = {Value}", !string.IsNullOrWhiteSpace(loki.Password));
+    }
+
+    private static void ConfigureSerilog(WebApplicationBuilder builder)
+    {
+        var lokiOptions = builder.Configuration
+            .GetSection(LokiOptions.SectionName)
+            .Get<LokiOptions>() ?? new LokiOptions();
+
+        var loggerConfig = new LoggerConfiguration()
+            .ReadFrom.Configuration(builder.Configuration)
+            .Enrich.FromLogContext()
+            .WriteTo.Console();
+
+        if (lokiOptions.Enabled)
+        {
+            Serilog.Debugging.SelfLog.Enable(Console.Error);
+
+            loggerConfig = loggerConfig.WriteTo.GrafanaLoki(
+                lokiOptions.Endpoint,
+                credentials: new LokiCredentials
+                {
+                    Login = lokiOptions.Username,
+                    Password = lokiOptions.Password
+                },
+                labels:
+                [
+                    new LokiLabel
+                    {
+                        Key = "service_name",
+                        Value = lokiOptions.ServiceName
+                    },
+                    new LokiLabel
+                    {
+                        Key = "environment",
+                        Value = builder.Environment.EnvironmentName
+                    }
+                ]);
+        }
+
+        Log.Logger = loggerConfig.CreateLogger();
+        builder.Host.UseSerilog(Log.Logger, dispose: true);
     }
 
     private static string Prefix(string? value)

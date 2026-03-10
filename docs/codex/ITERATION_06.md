@@ -349,3 +349,23 @@ This ensures that all structured logs related to a job contain the same
 correlation identifiers, enabling reliable log filtering and debugging.
 
 This change does not affect job processing behavior, queue logic, or metrics.
+
+### Log Export (Loki)
+
+The system exports structured logs to Grafana Cloud Loki using Serilog.
+
+Logs include correlation fields such as:
+
+- job_id
+- update_id
+- chat_id
+- attempt
+- component
+- operation
+- result
+
+This enables debugging of individual jobs through Grafana Explore.
+
+Metrics remain exported through OpenTelemetry.
+
+Logs and metrics together provide full observability.
