@@ -26,7 +26,5 @@ obj/
 .DS_Store
 Thumbs.db
 /src/BotTemplate.Api/appsettings.Development.json
-/src/BotTemplate.Api/appsettings.Development.json
-
 
 
