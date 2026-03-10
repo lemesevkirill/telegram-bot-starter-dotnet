@@ -1,6 +1,8 @@
+using BotTemplate.Core.Execution;
+
 namespace BotTemplate.Api.LLM;
 
 public interface ILLMService
 {
-    Task<LLMResult> TranslateToGermanAsync(string text, CancellationToken ct);
+    Task<string> TranslateAsync(JobContext ctx, string text, CancellationToken ct);
 }

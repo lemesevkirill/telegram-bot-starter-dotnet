@@ -1,8 +1,9 @@
 using BotTemplate.Core.Configuration;
+using BotTemplate.Core.Execution;
 using BotTemplate.Core.Jobs;
-using BotTemplate.Api.Execution;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Diagnostics;
 
 namespace BotTemplate.Api.Workers;
 
@@ -25,6 +26,7 @@ public sealed class JobWorker(
             try
             {
                 await FillAvailableCapacityAsync(stoppingToken);
+                await RefreshQueueMetricsAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -77,6 +79,7 @@ public sealed class JobWorker(
 
     private void StartJobProcessing(long jobId, DateTime acquiredAt, CancellationToken cancellationToken)
     {
+        Metrics.IncrementWorkerInflightJobs();
         var task = ProcessAcquiredJobAsync(jobId, acquiredAt, cancellationToken);
 
         lock (runningJobsLock)
@@ -130,6 +133,24 @@ public sealed class JobWorker(
             await using var scope = serviceScopeFactory.CreateAsyncScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var job = await dbContext.Jobs.SingleAsync(currentJob => currentJob.Id == jobId, cancellationToken);
+            var processingStopwatch = Stopwatch.StartNew();
+
+            Metrics.JobsAcquiredTotal.Add(
+                1,
+                new KeyValuePair<string, object?>("component", "worker"),
+                new KeyValuePair<string, object?>("operation", "acquire"),
+                new KeyValuePair<string, object?>("result", "success"));
+
+            logger.LogInformation(
+                "job_acquired component={component} operation={operation} status={status} job_id={job_id} update_id={update_id} chat_id={chat_id} attempt={attempt} duration_ms={duration_ms}",
+                "worker",
+                "acquire",
+                "success",
+                job.Id,
+                job.UpdateId,
+                job.ChatId,
+                job.Attempts,
+                0d);
 
             if (IsJobExpired(job, acquiredAt))
             {
@@ -137,21 +158,69 @@ public sealed class JobWorker(
                 job.UpdatedAt = DateTime.UtcNow;
                 job.LastError = $"Job expired: age exceeded {workerOptions.MaxJobAgeMinutes} minutes";
                 await dbContext.SaveChangesAsync(cancellationToken);
-                logger.LogWarning("Job failed {JobId}: IsJobExpired=true", job.Id);
+                var durationSeconds = processingStopwatch.Elapsed.TotalSeconds;
+                var queueWaitSeconds = (acquiredAt - job.CreatedAt).TotalSeconds;
+
+                Metrics.JobsFailedTotal.Add(
+                    1,
+                    new KeyValuePair<string, object?>("component", "worker"),
+                    new KeyValuePair<string, object?>("operation", "process_job"),
+                    new KeyValuePair<string, object?>("result", "failed"));
+                Metrics.JobDurationSeconds.Record(durationSeconds);
+                Metrics.JobQueueWaitSeconds.Record(queueWaitSeconds);
+
+                logger.LogWarning(
+                    "job_failed component={component} operation={operation} status={status} job_id={job_id} update_id={update_id} chat_id={chat_id} attempt={attempt} duration_ms={duration_ms}",
+                    "worker",
+                    "process_job",
+                    "failed_expired",
+                    job.Id,
+                    job.UpdateId,
+                    job.ChatId,
+                    job.Attempts,
+                    processingStopwatch.Elapsed.TotalMilliseconds);
                 return;
             }
 
             try
             {
+                var ctx = new JobContext
+                {
+                    JobId = job.Id,
+                    UpdateId = job.UpdateId,
+                    ChatId = job.ChatId,
+                    Attempt = job.Attempts
+                };
+
                 var jobExecutor = scope.ServiceProvider.GetRequiredService<IJobExecutor>();
-                await jobExecutor.ExecuteAsync(job, cancellationToken);
+                await jobExecutor.ExecuteAsync(ctx, job.UpdatePayload, cancellationToken);
 
                 job.Status = JobStatus.Completed;
                 job.LastError = null;
                 job.UpdatedAt = DateTime.UtcNow;
 
                 await dbContext.SaveChangesAsync(cancellationToken);
-                logger.LogInformation("Job completed {JobId}", job.Id);
+                var durationSeconds = processingStopwatch.Elapsed.TotalSeconds;
+                var queueWaitSeconds = (acquiredAt - job.CreatedAt).TotalSeconds;
+
+                Metrics.JobsCompletedTotal.Add(
+                    1,
+                    new KeyValuePair<string, object?>("component", "worker"),
+                    new KeyValuePair<string, object?>("operation", "process_job"),
+                    new KeyValuePair<string, object?>("result", "success"));
+                Metrics.JobDurationSeconds.Record(durationSeconds);
+                Metrics.JobQueueWaitSeconds.Record(queueWaitSeconds);
+
+                logger.LogInformation(
+                    "job_completed component={component} operation={operation} status={status} job_id={job_id} update_id={update_id} chat_id={chat_id} attempt={attempt} duration_ms={duration_ms}",
+                    "worker",
+                    "process_job",
+                    "success",
+                    job.Id,
+                    job.UpdateId,
+                    job.ChatId,
+                    job.Attempts,
+                    processingStopwatch.Elapsed.TotalMilliseconds);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -166,7 +235,28 @@ public sealed class JobWorker(
                 job.UpdatedAt = DateTime.UtcNow;
 
                 await dbContext.SaveChangesAsync(cancellationToken);
-                logger.LogError(ex, "Job failed {JobId}", job.Id);
+                var durationSeconds = processingStopwatch.Elapsed.TotalSeconds;
+                var queueWaitSeconds = (acquiredAt - job.CreatedAt).TotalSeconds;
+
+                Metrics.JobsFailedTotal.Add(
+                    1,
+                    new KeyValuePair<string, object?>("component", "worker"),
+                    new KeyValuePair<string, object?>("operation", "process_job"),
+                    new KeyValuePair<string, object?>("result", "failed"));
+                Metrics.JobDurationSeconds.Record(durationSeconds);
+                Metrics.JobQueueWaitSeconds.Record(queueWaitSeconds);
+
+                logger.LogError(
+                    ex,
+                    "job_failed component={component} operation={operation} status={status} job_id={job_id} update_id={update_id} chat_id={chat_id} attempt={attempt} duration_ms={duration_ms}",
+                    "worker",
+                    "process_job",
+                    "failed",
+                    job.Id,
+                    job.UpdateId,
+                    job.ChatId,
+                    job.Attempts,
+                    processingStopwatch.Elapsed.TotalMilliseconds);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -175,6 +265,7 @@ public sealed class JobWorker(
         }
         finally
         {
+            Metrics.DecrementWorkerInflightJobs();
             concurrencyLimiter.Release();
 
             lock (runningJobsLock)
@@ -194,6 +285,18 @@ public sealed class JobWorker(
     {
         var jobAge = acquiredAt - job.CreatedAt;
         return jobAge > TimeSpan.FromMinutes(workerOptions.MaxJobAgeMinutes);
+    }
+
+    private async Task RefreshQueueMetricsAsync(CancellationToken cancellationToken)
+    {
+        await using var scope = serviceScopeFactory.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var pendingCount = await dbContext.Jobs.CountAsync(job => job.Status == JobStatus.Pending, cancellationToken);
+        var processingCount = await dbContext.Jobs.CountAsync(job => job.Status == JobStatus.Processing, cancellationToken);
+
+        Metrics.SetJobsPending(pendingCount);
+        Metrics.SetJobsProcessing(processingCount);
     }
 
     private enum AcquisitionResultKind

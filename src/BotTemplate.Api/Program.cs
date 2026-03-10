@@ -5,8 +5,11 @@ using BotTemplate.Api.Services;
 using BotTemplate.Api.TTS;
 using BotTemplate.Api.Workers;
 using BotTemplate.Core.Configuration;
+using BotTemplate.Core.Execution;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
 using Telegram.Bot;
 
 namespace BotTemplate.Api;
@@ -91,6 +94,12 @@ public sealed class Program
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        builder.Services
+            .AddOptions<ObservabilityOptions>()
+            .Bind(builder.Configuration.GetSection(ObservabilityOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         builder.Services.AddDbContext<AppDbContext>((serviceProvider, options) =>
         {
             var databaseOptions = serviceProvider.GetRequiredService<IOptions<DatabaseOptions>>().Value;
@@ -121,6 +130,42 @@ public sealed class Program
         builder.Services.AddScoped<ITTSService>(serviceProvider => serviceProvider.GetRequiredService<OpenAiTTSService>());
         builder.Services.AddScoped<IJobExecutor, TelegramJobExecutor>();
 
+        var observabilitySection = builder.Configuration.GetSection(ObservabilityOptions.SectionName);
+        var observability = observabilitySection.Get<ObservabilityOptions>() ?? new ObservabilityOptions();
+
+        builder.Services
+            .AddOpenTelemetry()
+            .ConfigureResource(resourceBuilder =>
+            {
+                resourceBuilder
+                    .AddService(observability.ServiceName)
+                    .AddAttributes([
+                        new KeyValuePair<string, object>(
+                    "deployment.environment",
+                    builder.Environment.EnvironmentName)
+                    ]);
+            })
+            .WithMetrics(metricBuilder =>
+            {
+                metricBuilder
+                    .AddMeter(Metrics.MeterName)
+                    .AddAspNetCoreInstrumentation()
+                    .AddHttpClientInstrumentation()
+                    .AddOtlpExporter(options =>
+                    {
+                        options.Endpoint = new Uri(observability.OtlpEndpoint);
+
+                        // Grafana Cloud requires Basic auth
+                        if (!string.IsNullOrWhiteSpace(observability.OtlpApiKey))
+                        {
+                            options.Headers = $"Authorization=Basic {observability.OtlpApiKey}";
+                        }
+
+                        // Grafana OTLP gateway works best with HTTP protobuf
+                        options.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.HttpProtobuf;
+                    });
+            });
+
         builder.Services.AddHostedService<JobWorker>();
     }
 
@@ -139,11 +184,12 @@ public sealed class Program
         var worker = app.Services.GetRequiredService<IOptions<WorkerOptions>>().Value;
         var llm = app.Services.GetRequiredService<IOptions<LLMOptions>>().Value;
         var tts = app.Services.GetRequiredService<IOptions<TTSOptions>>().Value;
+        var observability = app.Services.GetRequiredService<IOptions<ObservabilityOptions>>().Value;
 
         logger.LogInformation("[CONFIG] Environment = {Value}", app.Environment.EnvironmentName);
         logger.LogInformation("[CONFIG] ASPNETCORE_URLS = {Value}", Prefix(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")));
-        logger.LogInformation("[CONFIG] Telegram.BotToken = {Value}", Prefix(telegram.BotToken));
-        logger.LogInformation("[CONFIG] Telegram.WebhookSecret = {Value}", Prefix(telegram.WebhookSecret));
+        logger.LogInformation("[CONFIG] Telegram.BotTokenConfigured = {Value}", !string.IsNullOrWhiteSpace(telegram.BotToken));
+        logger.LogInformation("[CONFIG] Telegram.WebhookSecretConfigured = {Value}", !string.IsNullOrWhiteSpace(telegram.WebhookSecret));
         logger.LogInformation("[CONFIG] Database.ConnectionString = {Value}", Prefix(database.ConnectionString));
         logger.LogInformation("[CONFIG] Worker.PollIntervalMs = {Value}", worker.PollIntervalMs);
         logger.LogInformation("[CONFIG] Worker.MaxConcurrentJobs = {Value}", worker.MaxConcurrentJobs);
@@ -152,13 +198,16 @@ public sealed class Program
         logger.LogInformation("[CONFIG] LLM.Model = {Value}", llm.Model);
         logger.LogInformation("[CONFIG] LLM.BaseUrl = {Value}", llm.BaseUrl);
         logger.LogInformation("[CONFIG] LLM.TimeoutSeconds = {Value}", llm.TimeoutSeconds);
-        logger.LogInformation("[CONFIG] LLM.ApiKey = {Value}", Prefix(llm.ApiKey));
+        logger.LogInformation("[CONFIG] LLM.ApiKeyConfigured = {Value}", !string.IsNullOrWhiteSpace(llm.ApiKey));
         logger.LogInformation("[CONFIG] TTS.Model = {Value}", tts.Model);
         logger.LogInformation("[CONFIG] TTS.Voice = {Value}", tts.Voice);
         logger.LogInformation("[CONFIG] TTS.Format = {Value}", tts.Format);
         logger.LogInformation("[CONFIG] TTS.TimeoutSeconds = {Value}", tts.TimeoutSeconds);
         logger.LogInformation("[CONFIG] TTS.MaxInputLength = {Value}", tts.MaxInputLength);
-        logger.LogInformation("[CONFIG] TTS.ApiKey = {Value}", Prefix(tts.ApiKey));
+        logger.LogInformation("[CONFIG] TTS.ApiKeyConfigured = {Value}", !string.IsNullOrWhiteSpace(tts.ApiKey));
+        logger.LogInformation("[CONFIG] Observability.ServiceName = {Value}", observability.ServiceName);
+        logger.LogInformation("[CONFIG] Observability.OtlpEndpoint = {Value}", observability.OtlpEndpoint);
+        logger.LogInformation("[CONFIG] Observability.OtlpApiKeyConfigured = {Value}", !string.IsNullOrWhiteSpace(observability.OtlpApiKey));
     }
 
     private static string Prefix(string? value)

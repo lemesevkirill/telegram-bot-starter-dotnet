@@ -3,7 +3,7 @@ using BotTemplate.Api.LLM;
 using BotTemplate.Api.Messaging;
 using BotTemplate.Api.Services;
 using BotTemplate.Api.TTS;
-using BotTemplate.Core.Jobs;
+using BotTemplate.Core.Execution;
 using Telegram.Bot.Types;
 
 namespace BotTemplate.Api.Execution;
@@ -14,12 +14,12 @@ public sealed class TelegramJobExecutor(
     ILLMService llmService,
     ITTSService ttsService) : IJobExecutor
 {
-    public async Task ExecuteAsync(Job job, CancellationToken ct)
+    public async Task ExecuteAsync(JobContext ctx, string payload, CancellationToken ct)
     {
-        logger.LogInformation("Processing started {JobId}", job.Id);
+        logger.LogInformation("Processing started {JobId}", ctx.JobId);
 
         var update = JsonSerializer.Deserialize<Update>(
-            job.UpdatePayload,
+            payload,
             new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
@@ -28,31 +28,28 @@ public sealed class TelegramJobExecutor(
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            logger.LogInformation("Message text is null or whitespace {JobId}", job.Id);
+            logger.LogInformation("Message text is null or whitespace {JobId}", ctx.JobId);
             return;
         }
 
-        logger.LogInformation("Sending typing indicator {JobId}", job.Id);
-        await telegramSender.SendTypingAsync(job.ChatId, ct);
+        logger.LogInformation("Sending typing indicator {JobId}", ctx.JobId);
+        await telegramSender.SendTypingAsync(ctx, ctx.ChatId, ct);
 
-        var llmResult = await llmService.TranslateToGermanAsync(text, ct);
+        var translated = await llmService.TranslateAsync(ctx, text, ct);
 
-        // logger.LogInformation("Sending translated text message {JobId}", job.Id);
-        // await telegramSender.SendTextMessageAsync(job.ChatId, llmResult.Text, ct);
-
-        logger.LogInformation("Generating TTS audio {JobId}", job.Id);
-        using var audio = await ttsService.SynthesizeAsync(llmResult.Text, ct);
+        logger.LogInformation("Generating TTS audio {JobId}", ctx.JobId);
+        using var audio = await ttsService.GenerateAsync(ctx, translated, ct);
 
         var audioMessage = new AudioMessage
         {
             Audio = audio,
             Title = "German Translation",
             Performer = "HearTheText",
-            Caption = llmResult.Text,
-            FileName = "translation filename without ext"
+            Caption = translated,
+            FileName = "translation.mp3"
         };
 
-        logger.LogInformation("Sending Telegram audio {JobId}", job.Id);
-        await telegramSender.SendAudioAsync(job.ChatId, audioMessage, ct);
+        logger.LogInformation("Sending Telegram audio {JobId}", ctx.JobId);
+        await telegramSender.SendAudioAsync(ctx, ctx.ChatId, audioMessage, ct);
     }
 }

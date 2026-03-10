@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Telegram.Bot.Types;
+using System.Diagnostics;
 
 namespace BotTemplate.Api.Endpoints;
 
@@ -23,8 +24,11 @@ public static class TelegramWebhookEndpoint
         HttpRequest request,
         AppDbContext dbContext,
         IOptions<TelegramOptions> telegramOptions,
+        ILogger<Program> logger,
         CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
+
         if (!request.Headers.TryGetValue("X-Telegram-Bot-Api-Secret-Token", out var secretTokenHeader) ||
             secretTokenHeader != telegramOptions.Value.WebhookSecret)
         {
@@ -80,8 +84,35 @@ public static class TelegramWebhookEndpoint
         catch (DbUpdateException ex)
             when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
+            logger.LogInformation(
+                "job_created component={component} operation={operation} status={status} job_id={job_id} update_id={update_id} chat_id={chat_id} attempt={attempt} duration_ms={duration_ms}",
+                "webhook",
+                "create_job",
+                "duplicate",
+                0L,
+                updateId.Value,
+                chatId.Value,
+                0,
+                stopwatch.Elapsed.TotalMilliseconds);
             return Results.Ok();
         }
+
+        Metrics.JobsCreatedTotal.Add(
+            1,
+            new KeyValuePair<string, object?>("component", "webhook"),
+            new KeyValuePair<string, object?>("operation", "create_job"),
+            new KeyValuePair<string, object?>("result", "success"));
+
+        logger.LogInformation(
+            "job_created component={component} operation={operation} status={status} job_id={job_id} update_id={update_id} chat_id={chat_id} attempt={attempt} duration_ms={duration_ms}",
+            "webhook",
+            "create_job",
+            "success",
+            job.Id,
+            job.UpdateId,
+            job.ChatId,
+            0,
+            stopwatch.Elapsed.TotalMilliseconds);
 
         return Results.Ok();
     }
