@@ -2,14 +2,15 @@ namespace BotTemplate.Api.LLM;
 
 public sealed class PromptBuilder
 {
-    public string BuildGermanTranslationPrompt(string text)
+    public string BuildTranslationPrompt(string text, string targetLanguage)
     {
         return
-            """
-            Translate the following text to German.
+            $"""
+            Translate the following text to {targetLanguage}.
             Return only the translated text.
 
             Text:
-            """ + $"\n{text}";
+            {text}
+            """;
     }
 }

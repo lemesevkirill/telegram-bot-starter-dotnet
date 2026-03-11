@@ -2,7 +2,6 @@ using System.Net.Http.Headers;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using BotTemplate.Core.Execution;
 using Microsoft.Extensions.Options;
 
 namespace BotTemplate.Api.LLM;
@@ -15,31 +14,28 @@ public sealed class OpenAiLLMService(
 {
     private readonly LLMOptions llmOptions = llmOptionsAccessor.Value;
 
-    public async Task<string> TranslateAsync(JobContext ctx, string text, CancellationToken ct)
+    public async Task<string> TranslateAsync(string text, string targetLanguage, CancellationToken ct)
     {
         var stopwatch = Stopwatch.StartNew();
 
         Metrics.LlmRequestsTotal.Add(
             1,
             new KeyValuePair<string, object?>("component", "llm"),
-            new KeyValuePair<string, object?>("operation", "translate_to_german"),
+            new KeyValuePair<string, object?>("operation", "translate_text"),
             new KeyValuePair<string, object?>("model", llmOptions.Model),
             new KeyValuePair<string, object?>("result", "started"));
 
         logger.LogInformation(
-            "llm_started component={component} operation={operation} status={status} job_id={job_id} update_id={update_id} chat_id={chat_id} attempt={attempt} duration_ms={duration_ms}",
+            "llm_started component={component} operation={operation} status={status} target_language={target_language} duration_ms={duration_ms}",
             "llm",
-            "translate_to_german",
+            "translate_text",
             "started",
-            ctx.JobId,
-            ctx.UpdateId,
-            ctx.ChatId,
-            ctx.Attempt,
+            targetLanguage,
             0d);
 
         try
         {
-            var prompt = promptBuilder.BuildGermanTranslationPrompt(text);
+            var prompt = promptBuilder.BuildTranslationPrompt(text, targetLanguage);
             var payload = JsonSerializer.Serialize(new
             {
                 model = llmOptions.Model,
@@ -64,19 +60,16 @@ public sealed class OpenAiLLMService(
             Metrics.LlmLatencySeconds.Record(
                 stopwatch.Elapsed.TotalSeconds,
                 new KeyValuePair<string, object?>("component", "llm"),
-                new KeyValuePair<string, object?>("operation", "translate_to_german"),
+                new KeyValuePair<string, object?>("operation", "translate_text"),
                 new KeyValuePair<string, object?>("model", llmOptions.Model),
                 new KeyValuePair<string, object?>("result", "success"));
 
             logger.LogInformation(
-                "llm_completed component={component} operation={operation} status={status} job_id={job_id} update_id={update_id} chat_id={chat_id} attempt={attempt} duration_ms={duration_ms}",
+                "llm_completed component={component} operation={operation} status={status} target_language={target_language} duration_ms={duration_ms}",
                 "llm",
-                "translate_to_german",
+                "translate_text",
                 "success",
-                ctx.JobId,
-                ctx.UpdateId,
-                ctx.ChatId,
-                ctx.Attempt,
+                targetLanguage,
                 stopwatch.Elapsed.TotalMilliseconds);
 
             return textResult;
@@ -86,20 +79,17 @@ public sealed class OpenAiLLMService(
             Metrics.LlmErrorsTotal.Add(
                 1,
                 new KeyValuePair<string, object?>("component", "llm"),
-                new KeyValuePair<string, object?>("operation", "translate_to_german"),
+                new KeyValuePair<string, object?>("operation", "translate_text"),
                 new KeyValuePair<string, object?>("model", llmOptions.Model),
                 new KeyValuePair<string, object?>("result", "error"));
 
             logger.LogError(
                 ex,
-                "llm_failed component={component} operation={operation} status={status} job_id={job_id} update_id={update_id} chat_id={chat_id} attempt={attempt} duration_ms={duration_ms}",
+                "llm_failed component={component} operation={operation} status={status} target_language={target_language} duration_ms={duration_ms}",
                 "llm",
-                "translate_to_german",
+                "translate_text",
                 "failed",
-                ctx.JobId,
-                ctx.UpdateId,
-                ctx.ChatId,
-                ctx.Attempt,
+                targetLanguage,
                 stopwatch.Elapsed.TotalMilliseconds);
             throw;
         }

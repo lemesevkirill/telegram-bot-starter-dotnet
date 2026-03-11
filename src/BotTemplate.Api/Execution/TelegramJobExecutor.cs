@@ -35,7 +35,11 @@ public sealed class TelegramJobExecutor(
         logger.LogInformation("Sending typing indicator {JobId}", ctx.JobId);
         await telegramSender.SendTypingAsync(ctx, ctx.ChatId, ct);
 
-        var translated = await llmService.TranslateAsync(ctx, text, ct);
+        var targetLanguage = ctx.ExecutionOptions.TryGetValue("targetLanguage", out var configuredLanguage) &&
+                             !string.IsNullOrWhiteSpace(configuredLanguage)
+            ? configuredLanguage
+            : "en";
+        var translated = await llmService.TranslateAsync(text, targetLanguage, ct);
 
         logger.LogInformation("Generating TTS audio {JobId}", ctx.JobId);
         using var audio = await ttsService.GenerateAsync(ctx, translated, ct);
@@ -43,7 +47,7 @@ public sealed class TelegramJobExecutor(
         var audioMessage = new AudioMessage
         {
             Audio = audio,
-            Title = "German Translation",
+            Title = "Translation",
             Performer = "HearTheText",
             Caption = translated,
             FileName = "translation.mp3"

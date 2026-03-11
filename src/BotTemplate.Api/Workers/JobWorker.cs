@@ -189,7 +189,8 @@ public sealed class JobWorker(
                     JobId = job.Id,
                     UpdateId = job.UpdateId,
                     ChatId = job.ChatId,
-                    Attempt = job.Attempts
+                    Attempt = job.Attempts,
+                    ExecutionOptions = new Dictionary<string, string>(job.ExecutionOptions)
                 };
 
                 var jobExecutor = scope.ServiceProvider.GetRequiredService<IJobExecutor>();

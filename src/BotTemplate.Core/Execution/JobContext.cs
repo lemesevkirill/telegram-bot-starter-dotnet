@@ -9,4 +9,6 @@ public sealed class JobContext
     public long ChatId { get; init; }
 
     public int Attempt { get; init; }
+
+    public Dictionary<string, string> ExecutionOptions { get; init; } = new();
 }

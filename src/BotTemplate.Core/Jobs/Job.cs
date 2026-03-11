@@ -12,6 +12,8 @@ public sealed class Job
 
     public string UpdatePayload { get; set; } = string.Empty;
 
+    public Dictionary<string, string> ExecutionOptions { get; set; } = new();
+
     public JobStatus Status { get; set; }
 
     public int Attempts { get; set; }

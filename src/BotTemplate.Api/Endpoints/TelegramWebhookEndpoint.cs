@@ -55,6 +55,7 @@ public static class TelegramWebhookEndpoint
         var updateId = update?.Id;
         var chatId = update?.Message?.Chat.Id;
         var userId = update?.Message?.From?.Id;
+        var languageCode = update?.Message?.From?.LanguageCode;
 
         if (updateId is null || chatId is null || userId is null)
         {
@@ -62,12 +63,20 @@ public static class TelegramWebhookEndpoint
         }
 
         var now = DateTime.UtcNow;
+        var executionOptions = new Dictionary<string, string>();
+
+        if (!string.IsNullOrWhiteSpace(languageCode))
+        {
+            executionOptions["targetLanguage"] = languageCode;
+        }
+
         var job = new Job
         {
             UpdateId = updateId.Value,
             ChatId = chatId.Value,
             UserId = userId.Value,
             UpdatePayload = rawBody,
+            ExecutionOptions = executionOptions,
             Status = JobStatus.Pending,
             Attempts = 0,
             LastError = null,
